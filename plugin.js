@@ -69,6 +69,25 @@ function sourceMappingUrl(uri, sourceMap) {
   return path.join(path.dirname(uri), cacheBuster(sourceMap) + '.map');
 }
 
+// Inspects the command line arguments to determine if it should minfiy
+function shouldMinify() {
+  if (process.argv.length < 3)
+    return false;
+
+  if (process.argv[2].charAt(0) === '-' || process.argv[2] === 'run') {
+    // When running the app, minify only if --production is set
+    return process.argv.indexOf('--production') !== -1;
+  }
+
+  if (process.argv[2] === 'deploy' || process.argv[2] === 'bundle') {
+    // When bundling/deploying the app, minify unless --debug is set
+    return process.argv.indexOf('--debug') === -1;
+  }
+
+  // Minify if some other command is called... I guess?
+  return true;
+}
+
 
 /***
  *       __________  __  _______  ______    ___  ______________  _   __
@@ -152,7 +171,7 @@ function buildLayers() {
  * under the given layer name.
  */
 function addAssets(layer, pkgs, compileStep) {
-  var minify = false;
+  var minify = shouldMinify();
 
   var options = {
     layer: layer
@@ -231,30 +250,6 @@ var pkgProto = packages.Package.prototype;
 if (! pkgProto.__layersInjected) {
   log.logTemporary('=> Injecting Layers...');
 
-  // The first problem is making sure that this package.js
-  // file is run every time that Meteor is run. Thus it cannot
-  // be cached as a unipackage. To do this, we hook into the
-  // unipackage saving routine, and prevent caching
-  //var old = pkgProto.saveAsUnipackage;
-  //pkgProto.saveAsUnipackage = function(outputPath) {
-    //old.apply(this, arguments);
-
-    //if (this.name === 'layers') {
-      //// Read in the original buildInfo.json
-      //var buildInfo = JSON.parse(fs.readFileSync(path.join(outputPath, 'buildInfo.json'), {encoding: 'utf-8'}));
-      //var browserFiles = buildInfo.sliceDependencies['browser.json'].files;
-
-      //// Wipe out the sha1 codes for the files
-      //for (var file in browserFiles) {
-        //if (typeof browserFiles[file] === 'string')
-          //browserFiles[file] = 'don\'t cache me';
-      //}
-
-      //// Write the file back to replace it
-      //fs.writeFileSync(path.join(outputPath, 'buildInfo.json'), new Buffer(JSON.stringify(buildInfo, undefined, 2), 'utf-8'));
-    //}
-  //};
-
   // The markBoundary function is used to call handler functions. By wrapping it,
   // we can intercept handler functions! Awesome! (we do need to check that it is
   // a handler function though).
@@ -290,6 +285,7 @@ if (! pkgProto.__layersInjected) {
   // Insure that injection doesn't happen twice
   pkgProto.__layersInjected = true;
 
-  log.log('=> Layers Injected Successfully.');
+  log.log('=> Layers Injected Successfully. '
+          + (shouldMinify() ? '(minifying)' : ''));
 }
 
