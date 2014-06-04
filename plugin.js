@@ -9,6 +9,7 @@ var log = Npm.require('./run-log.js');
 var release = Npm.require('./release.js');
 var linker = Npm.require('./linker.js');
 var unipackage = Npm.require('./unipackage.js');
+var project = Npm.require('./project.js');
 
 var minifiers = unipackage.load({
   library: release.current.library,
@@ -25,8 +26,8 @@ var minifiers = unipackage.load({
  *                                                      
  */
 
-// Returns the root directory for the current Meteor project.
-function meteorRoot() {
+// The root directory of the Meteor project
+var meteorRoot = (function() {
   function isAppDir(filepath) {
     try {
       return fs.statSync(path.join(filepath, '.meteor', 'packages')).isFile();
@@ -49,7 +50,7 @@ function meteorRoot() {
   }
 
   return currentDir;
-}
+})();
 
 // Generates a cache buster string
 function cacheBuster(src) {
@@ -87,7 +88,7 @@ function addFileToLayer(layer, file) {
 var savedCompileStep = null;
 
 // Matches the layer in a path. match[1] will be the name of the layer
-var layerRe = /(?:^|\/)layers\/([^\/]+)\//;
+var layerRe = /^layers\/([^\/]+)\//;
 
 /**
  * Called for every compileStep - use it to capture the compilation of the root app
@@ -123,10 +124,10 @@ function buildLayers() {
 
     // We need to make a client package, but we can modify an os one into one
     pkg.initFromOptions('__layer__' + name, {
-      sourceRoot: meteorRoot(),
-      serveRoot: '/layers/' + name,
+      sourceRoot: meteorRoot,
+      serveRoot: '/',
       sliceName: 'main',
-      use: [],
+      use: project.getPackages(meteorRoot),
       sources: files
     });
 
