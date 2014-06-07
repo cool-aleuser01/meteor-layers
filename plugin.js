@@ -156,14 +156,16 @@ function buildLayers() {
 
     var slice = pkg.slices[0];
     slice.arch = 'browser';
-    slice.id = pkg.id + '.layer@browser';
+    slice.id = pkg.id + '.main@browser';
 
     // Build the package!
     pkg.build();
 
     addAssets(name, [pkg], savedCompileStep);
-    savedCompileStep = null;
   });
+
+  savedCompileStep = null;
+  layers = {};
 }
 
 /**

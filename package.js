@@ -9,3 +9,7 @@ Package._transitional_registerBuildPlugin({
   npmDependencies: {}
 });
 
+Package.on_use(function(api) {
+  api.add_files(['loader.js'], 'client');
+  api.export('Layers', 'client');
+});
