@@ -1,60 +1,79 @@
+var packages = {};
 var layers = {};
 
+
 Layers = {
+
+  _packages: packages,
+
+  _layers: layers,
+
   load: function(layer, callback) {
-    if (!layers[layer])
-      throw new Error('No such layer exists');
+    if (! layers[layer])
+      throw new Error('Layer: ' + layer + ' does not exist');
 
-    // Has the layer already been fully loaded?
-    if (layers[layer].loaded && typeof callback === 'function')
-      callback(Packages['__layer__' + layer]);
+    _.each(layers[layer].packages, function(pkg) {
+      Layers.loadPackage(pkg);
+    });
 
-    // Record the callback
+    Layers.loadPackage('__layer__' + layer, function() {
+      if (typeof callback === 'function')
+        callback(Package['__layer__' + layer]);
+    });
+  },
+
+  loadPackage: function(pkg, callback) {
+    // Guard against multiple calls / incorrect calls
+    if (! packages[pkg])
+      throw new Error('Package: ' + pkg + ' does not exist');
+
+    if (typeof Package[pkg] !== 'undefined' && typeof callback === 'function')
+      callback(Package[pkg]);
+
     if (typeof callback === 'function')
-      layers[layer].callbacks.push(callback);
+      packages[pkg].callbacks.push(callback);
 
-
-    if (layers[layer].loading)
+    if (packages[pkg].loading)
       return;
 
-    var loaded = 0;
+    packages[pkg].loading = true;
 
-    // Load all of the JS
-    _.each(layers[layer].js, function(jsURI) {
+    // Load the javascript
+    var lastScript = null;
+    _.each(packages[pkg].js, function(jsURI) {
       var done = false;
 
+      // Configure the script tag
       var script = document.createElement('script');
-      script.async = false; // Load order matters
+      script.async = false;
       script.setAttribute('type', 'text/javascript');
 
-      // Listen for the script to finish loading
       script.onload = script.onreadystatechange = function() {
         if (! done && (! this.readyState
-                       || this.readyState === 'loaded'
-                       || this.readyState === 'complete')) {
+                      || this.readyState === 'loaded'
+                      || this.readyState === 'complete')) {
           done = true;
-          loaded++;
 
-          if (loaded >= layers[layer].js.length) {
-            layers[layer].loaded = true;
-
-            _.each(layers[layer].callbacks, function(callback) {
-              callback(Packages['__layer__' + layer]);
+          if (lastScript === script) {
+            _.each(packages[pkg].callbacks, function(callback) {
+              callback(Package[pkg]);
             });
           }
 
-          // Clean up the script
           script.onload = script.onreadystatechange = null;
           document.body.removeChild(script);
         }
       };
 
+      lastScript = script;
+
+      // Perform the request!
       script.setAttribute('src', Meteor.absoluteUrl(jsURI));
       document.body.appendChild(script);
     });
 
-    // Load all of the CSS
-    _.each(layers[layer].css, function(cssURI) {
+    // Load the css
+    _.each(packages[pkg].css, function(cssURI) {
       var link = document.createElement('link');
       document.head.appendChild(link);
       link.setAttribute('rel', 'stylesheet');
@@ -62,20 +81,22 @@ Layers = {
       link.setAttribute('href', Meteor.absoluteUrl(cssURI));
     });
 
-    // Check if all JS has already been loaded (there was none)
-    if (loaded >= layers[layer].js.length) {
-      layers[layer].loaded = true;
-      _.each(layers[layer].callbacks, function(callback) {
-        callback(Packages['__layer__' + layer]);
+    // Check if no scripts were loaded and callbacks should fire immediately
+    if (lastScript === null) {
+      _.each(packages[pkg].callbacks, function(callback) {
+        callback(Package[pkg]);
       });
     }
+  },
 
-    layers[layer].loading = true;
-  }, 
+  _registerLayer: function(cfg) {
+    cfg.callbacks = [];
+    layers[cfg.name] = cfg;
+  },
 
-  _register: function(options) {
-    layers[options.layer] = layers[options.layer] || {};
-    layers[options.layer].js = options.js;
-    layers[options.layer].css = options.css;
+  _registerPackage: function(cfg) {
+    cfg.callbacks = [];
+    packages[cfg.name] = cfg;
   }
-}
+};
+

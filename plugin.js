@@ -137,7 +137,21 @@ function compileStepInject(compileStep, handler) {
  * Used to build layers, and inject them into the app before prelinking.
  */
 function buildLayers() {
+  var usedPackages = [];
+
   _.each(layers, function(files, name) {
+    // Read in the layer's configuration file
+    try {
+      var config = JSON.parse(fs.readFileSync(path.join(meteorRoot, 'layers', name, 'layer.json'), {encoding: 'utf-8'}));
+    } catch (e) {
+      var config = {};
+    }
+
+    _.defaults(config, {
+      uses: [],
+      exports: null
+    });
+
     // Each layer is internally a package, lets make one
     var pkg = new packages.Package(release.current.library, 'layers/' + name);
 
@@ -146,7 +160,7 @@ function buildLayers() {
       sourceRoot: meteorRoot,
       serveRoot: '/',
       sliceName: 'main',
-      use: project.getPackages(meteorRoot),
+      use: _.union(project.getPackages(meteorRoot), config.uses),
       sources: files
     });
 
@@ -155,13 +169,41 @@ function buildLayers() {
     delete pkg.defaultSlices['os'];
 
     var slice = pkg.slices[0];
+    slice.declaredExports = _.map(config.exports, function(name) {
+      return {
+        name: name,
+        testOnly: false
+      }
+    });
     slice.arch = 'browser';
     slice.id = pkg.id + '.main@browser';
 
     // Build the package!
     pkg.build();
 
-    addAssets(name, [pkg], savedCompileStep);
+    // Record the packages which will need to be avaliable to the client
+    usedPackages.push(pkg);
+    usedPackages = _.union(usedPackages, _.map(config.uses, function(pkgName) {
+      return release.current.library.get(pkgName);
+    }));
+
+    // Send down the package list to the client
+    config.uses.push('__layer__' + name);
+    layerInfo = {
+      name: name,
+      packages: config.uses
+    };
+
+    savedCompileStep.addJavaScript({
+      data: 'Package["layers"].Layers._registerLayer(' + JSON.stringify(layerInfo) + ');',
+      sourcePath: 'layers/' + name,
+      path: 'layers/__register_layer__' + name + '.js'
+    });
+
+  });
+
+  _.each(usedPackages, function(pkg) {
+    addAssets(pkg, savedCompileStep);
   });
 
   savedCompileStep = null;
@@ -172,70 +214,68 @@ function buildLayers() {
  * Add the assets provided by the given packages to the compileStep,
  * under the given layer name.
  */
-function addAssets(layer, pkgs, compileStep) {
+function addAssets(pkg, compileStep) {
   var minify = shouldMinify();
 
   var options = {
-    layer: layer
+    name: pkg.name
   };
 
-  _.each(pkgs, function(pkg) {
-    var assets = pkg.getSingleSlice('main', 'browser').getResources('browser');
+  var assets = pkg.getSingleSlice('main', 'browser').getResources('browser');
 
-    _.each(assets, function(asset) {
-      var uri = asset.servePath.substring(1);
-      var data = asset.data;
+  _.each(assets, function(asset) {
+    var uri = asset.servePath.substring(1);
+    var data = asset.data;
 
-      /*** SOURCE MAPS ***/
-      if (asset.sourceMap && ! minify) {
-        var src = data.toString('utf8');
-        var smu = sourceMappingUrl(uri, asset.sourceMap);
+    /*** SOURCE MAPS ***/
+    if (asset.sourceMap && ! minify) {
+      var src = data.toString('utf8');
+      var smu = sourceMappingUrl(uri, asset.sourceMap);
 
-        if (asset.type === 'js')
-          src += '\n\n//# sourceMappingURL=' + path.basename(smu) + '\n';
-        else if (asset.type === 'css')
-          src += '\n\n/*# sourceMappingURL=' + path.basename(smu) + ' */\n';
-
-        compileStep.addAsset({
-          data: new Buffer(asset.sourceMap, 'utf8'),
-          path: smu
-        });
-
-        data = new Buffer(src, 'utf8');
-      }
-
-      /*** MINIFICATION ***/
-      if (minify) {
-        var src = data.toString('utf8');
-
-        if (asset.type === 'js') {
-          src = minifiers.UglifyJSMinify(src, {
-            fromString: true,
-            compress: { drop_debugger: false }
-          }).code;
-        } else if (asset.type === 'css') {
-          src = minifers.CssTools.minifyCss(src);
-        }
-
-        data = new Buffer(src, 'utf8');
-      }
-
-      /*** RECORD FILE SERVE PATH ***/
-      options[asset.type] = options[asset.type] || [];
-      options[asset.type].push(addCacheBuster(uri, data.toString('utf8')));
+      if (asset.type === 'js')
+        src += '\n\n//# sourceMappingURL=' + path.basename(smu) + '\n';
+      else if (asset.type === 'css')
+        src += '\n\n/*# sourceMappingURL=' + path.basename(smu) + ' */\n';
 
       compileStep.addAsset({
-        data: data,
-        path: uri
+        data: new Buffer(asset.sourceMap, 'utf8'),
+        path: smu
       });
+
+      data = new Buffer(src, 'utf8');
+    }
+
+    /*** MINIFICATION ***/
+    if (minify) {
+      var src = data.toString('utf8');
+
+      if (asset.type === 'js') {
+        src = minifiers.UglifyJSMinify(src, {
+          fromString: true,
+          compress: { drop_debugger: false }
+        }).code;
+      } else if (asset.type === 'css') {
+        src = minifers.CssTools.minifyCss(src);
+      }
+
+      data = new Buffer(src, 'utf8');
+    }
+
+    /*** RECORD FILE SERVE PATH ***/
+    options[asset.type] = options[asset.type] || [];
+    options[asset.type].push(addCacheBuster(uri, data.toString('utf8')));
+
+    compileStep.addAsset({
+      data: data,
+      path: uri
     });
   });
 
   /*** SERVE REGISTRATION ***/
   compileStep.addJavaScript({
-    data: 'Package["layers"].Layers._register(' + JSON.stringify(options) + ');',
-    sourcePath: 'layers/' + layer,
-    path: 'layers/register/' + layer + '.js'
+    data: 'Package["layers"].Layers._registerPackage(' + JSON.stringify(options) + ');',
+    sourcePath: 'packages/' + pkg.name,
+    path: 'layers/__register_package__' + pkg.name + '.js'
   });
 }
 
