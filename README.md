@@ -64,6 +64,8 @@ Exports are declared in your `layer.json` file as follows:
 }
 ```
 
+If you only want your code to run on the client, you can place it in a `client` directory, like this: `layers/myLayer/client/*`
+
 How it works
 ------------
 
